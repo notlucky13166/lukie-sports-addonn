@@ -99,9 +99,7 @@ async function extractM3u8(channelId) {
         'Referer': 'https://dlhd.pk'
       }
     });
-    console.log('HTML length:', html.length);
     const match = html.match(/window\.atob\('([^']+)'\)/);
-    console.log('Match found:', !!match);
     if (!match) return null;
     return Buffer.from(match[1], 'base64').toString('utf8');
   } catch (e) {
@@ -110,25 +108,48 @@ async function extractM3u8(channelId) {
   }
 }
 
+app.get('/proxy.m3u8', async (req, res) => {
+  try {
+    const url = req.query.url;
+    const referer = req.query.referer;
+
+    const response = await axios.get(url, {
+      headers: {
+        'Referer': referer,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Origin': 'https://donis.jimpenopisonline.online'
+      },
+      responseType: 'text'
+    });
+
+    const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
+    let playlist = response.data;
+    playlist = playlist.replace(/^(?!#)(.+)$/gm, (line) => {
+      const segUrl = line.startsWith('http') ? line : baseUrl + line;
+      return `https://lukie-sports-addonn.onrender.com/proxy.m3u8?url=${encodeURIComponent(segUrl)}&referer=${encodeURIComponent(referer)}`;
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(playlist);
+  } catch (e) {
+    console.error('Proxy error:', e.message);
+    res.status(500).send('Proxy error');
+  }
+});
+
 app.get('/stream/channel/:id.json', async (req, res) => {
   try {
     const channelId = req.params.id.replace('dlhd_', '');
     const m3u8 = await extractM3u8(channelId);
-    console.log('m3u8:', m3u8);
     if (m3u8) {
+      const referer = `https://donis.jimpenopisonline.online/premiumtv/daddy3.php?id=${channelId}`;
+      const proxiedUrl = `https://lukie-sports-addonn.onrender.com/proxy.m3u8?url=${encodeURIComponent(m3u8)}&referer=${encodeURIComponent(referer)}`;
       res.json({
         streams: [{
-          url: m3u8,
+          url: proxiedUrl,
           title: '🔴 Lukie Sports HD',
-          behaviorHints: {
-            notWebReady: false,
-            proxyHeaders: {
-              request: {
-                'Referer': `https://donis.jimpenopisonline.online/premiumtv/daddy3.php?id=${channelId}`,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-              }
-            }
-          }
+          behaviorHints: { notWebReady: false }
         }]
       });
     } else {
