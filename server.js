@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const { chromium } = require('playwright');
 
 const app = express();
 const PORT = process.env.PORT || 7000;
@@ -91,52 +90,41 @@ app.get('/meta/channel/:id.json', async (req, res) => {
   }
 });
 
-async function extractM3u8(embedUrl) {
-  const browser = await chromium.launch({ 
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-  });
-  const page = await context.newPage();
-  let m3u8Url = null;
-  let capturedHeaders = {};
-
-  page.on('request', request => {
-    const url = request.url();
-    if (!m3u8Url && url.includes('.m3u8')) {
-      m3u8Url = url;
-      capturedHeaders = request.headers();
-    }
-  });
-
+async function extractM3u8(channelId) {
+  const embedUrl = `https://donis.jimpenopisonline.online/premiumtv/daddy3.php?id=${channelId}`;
   try {
-    await page.goto(embedUrl, { waitUntil: 'networkidle', timeout: 15000 });
-    if (!m3u8Url) await page.waitForTimeout(3000);
-  } catch (e) {}
-
-  await browser.close();
-  return m3u8Url ? { url: m3u8Url, headers: capturedHeaders } : null;
+    const { data: html } = await axios.get(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://dlhd.pk'
+      }
+    });
+    console.log('HTML length:', html.length);
+    const match = html.match(/window\.atob\('([^']+)'\)/);
+    console.log('Match found:', !!match);
+    if (!match) return null;
+    return Buffer.from(match[1], 'base64').toString('utf8');
+  } catch (e) {
+    console.error('extractM3u8 error:', e.message);
+    return null;
+  }
 }
 
 app.get('/stream/channel/:id.json', async (req, res) => {
   try {
     const channelId = req.params.id.replace('dlhd_', '');
-    const embedUrl = `https://dlhd.pk/stream/stream-${channelId}.php`;
-    
-    const result = await extractM3u8(embedUrl);
-    
-    if (result) {
+    const m3u8 = await extractM3u8(channelId);
+    console.log('m3u8:', m3u8);
+    if (m3u8) {
       res.json({
         streams: [{
-          url: result.url,
+          url: m3u8,
           title: '🔴 Lukie Sports HD',
           behaviorHints: {
             notWebReady: false,
             proxyHeaders: {
               request: {
-                'Referer': embedUrl,
+                'Referer': `https://donis.jimpenopisonline.online/premiumtv/daddy3.php?id=${channelId}`,
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
               }
             }
@@ -144,15 +132,10 @@ app.get('/stream/channel/:id.json', async (req, res) => {
         }]
       });
     } else {
-      // fallback to external
-      res.json({
-        streams: [{
-          externalUrl: embedUrl,
-          title: '📺 Lukie Sports (External)'
-        }]
-      });
+      res.json({ streams: [{ externalUrl: `https://dlhd.pk/stream/stream-${channelId}.php`, title: '📺 External' }] });
     }
   } catch (e) {
+    console.error(e.message);
     res.json({ streams: [] });
   }
 });
